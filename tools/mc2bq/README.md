@@ -29,7 +29,10 @@ Export Migration Center data to BigQuery
   -force
         force the export of the data even if the destination table exists, the operation will delete all the content in the original table. (env: MC2BQ_FORCE)
   -region string
-        migration center region. (env: MC2BQ_REGION) (default "us-central1")
+        migration center region, or comma-separated list of regions for multi-region export.
+        When multiple regions are provided, separate tables are created per region by default.
+        Set MC2BQ_MERGE_REGIONS environment variable to merge all regions into single tables.
+        (env: MC2BQ_REGION) (default "us-central1")
   -schema-path string
         use the schema at the specified path instead of using the embedded schema. (env: MC2BQ_SCHEMA_PATH)
   -target-project string
@@ -37,6 +40,25 @@ Export Migration Center data to BigQuery
   -version
         print the version and exit.
 ```
+
+## Multi-Region Export
+
+Export from multiple regions with separate tables per region:
+
+```sh
+mc2bq -region us-central1,europe-west1 project dataset
+```
+
+Creates tables: `assets_us-central1`, `assets_europe-west1`, `groups_us-central1`, etc.
+
+Merge all regions into single tables:
+
+```sh
+export MC2BQ_MERGE_REGIONS=1
+mc2bq -region us-central1,europe-west1 project dataset
+```
+
+Creates tables: `assets`, `groups`, `preference_sets` (containing all region data)
 
 ## Run in the cloud using Cloud Run
 

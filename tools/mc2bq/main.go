@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/GoogleCloudPlatform/migrationcenter-utils/tools/mc2bq/pkg/export"
 	"github.com/GoogleCloudPlatform/migrationcenter-utils/tools/mc2bq/pkg/messages"
@@ -116,6 +117,7 @@ func parseFlags(params *export.Params, argv []string) (cliAction, error) {
 	}
 
 	params.Force = params.Force || os.Getenv("MC2BQ_FORCE") != ""
+	params.MergeRegions = os.Getenv("MC2BQ_MERGE_REGIONS") != ""
 
 	if params.ProjectID == "" || params.DatasetID == "" {
 		fs.Usage()
@@ -136,6 +138,26 @@ func parseFlags(params *export.Params, argv []string) (cliAction, error) {
 	if err != nil {
 		return actionInvalid, err
 	}
+
+	// Validate and normalize regions
+	regions := strings.Split(params.Region, ",")
+	seen := make(map[string]bool)
+	valid := make([]string, 0, len(regions))
+	for _, r := range regions {
+		r = strings.TrimSpace(r)
+		if r == "" {
+			continue
+		}
+		if seen[r] {
+			return actionInvalid, fmt.Errorf("duplicate region: %s", r)
+		}
+		seen[r] = true
+		valid = append(valid, r)
+	}
+	if len(valid) == 0 {
+		return actionInvalid, fmt.Errorf("at least one region must be specified")
+	}
+	params.Region = strings.Join(valid, ",")
 
 	return actionExport, nil
 }

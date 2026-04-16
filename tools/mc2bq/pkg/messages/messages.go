@@ -53,7 +53,7 @@ const (
 	ParamDescriptionTargetProject SimpleMessage = "target project where the data should be exported to, if not set the project that contains the migration center data will be used. (env: MC2BQ_TARGET_PROJECT)"
 	ParamDescriptionForce         SimpleMessage = "force the export of the data even if the destination table exists, the operation will delete all the content in the original table. (env: MC2BQ_FORCE)"
 	ParamDescriptionSchemaPath    SimpleMessage = "use the schema at the specified path instead of using the embedded schema. (env: MC2BQ_SCHEMA_PATH)"
-	ParamDescriptionRegion        SimpleMessage = "migration center region. (env: MC2BQ_REGION)"
+	ParamDescriptionRegion        SimpleMessage = "migration center region, or comma-separated list of regions. (env: MC2BQ_REGION)"
 	ParamDescriptionVersion       SimpleMessage = "print the version and exit."
 	ParamDescriptionDumpSchema    SimpleMessage = "write the schema file embedded in the current version to stdout."
 	ExportSuccess                 SimpleMessage = "Data exported successfully"

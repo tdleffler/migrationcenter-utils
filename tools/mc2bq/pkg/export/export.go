@@ -48,6 +48,7 @@ type Params struct {
 	Force           bool
 	DatasetID       string
 	TablePrefix     string
+	MergeRegions    bool
 	Schema          *exporterschema.ExporterSchema
 	MCOptions       []option.ClientOption
 	UserAgentSuffix string
@@ -77,8 +78,29 @@ func buildMCClientOptions(params *Params) []option.ClientOption {
 	return append(buildClientOptions(params), params.MCOptions...)
 }
 
-func newExportTask(ctx context.Context, dataset *bigquery.Dataset, params *Params, src mcutil.ObjectSource, tableSuffix string, objectCount uint64) func() error {
-	tblName := params.TablePrefix + tableSuffix
+// parseRegions splits comma-separated regions, trims whitespace, removes empties
+func parseRegions(regionStr string) []string {
+	regions := strings.Split(regionStr, ",")
+	result := make([]string, 0, len(regions))
+	for _, r := range regions {
+		r = strings.TrimSpace(r)
+		if r != "" {
+			result = append(result, r)
+		}
+	}
+	return result
+}
+
+// computeRegionSuffix returns suffix for table names based on merge mode
+func computeRegionSuffix(region string, mergeRegions bool) string {
+	if mergeRegions {
+		return ""
+	}
+	return "_" + region
+}
+
+func newExportTask(ctx context.Context, dataset *bigquery.Dataset, params *Params, src mcutil.ObjectSource, tableSuffix string, regionSuffix string, objectCount uint64) func() error {
+	tblName := params.TablePrefix + tableSuffix + regionSuffix
 	return func() error {
 		done := make(chan bool, 1)
 		defer close(done)
@@ -142,13 +164,17 @@ func Export(params *Params) error {
 	// The operation never times out, the user can just kill the tool.
 	ctx := context.Background()
 
-	path := mcutil.ProjectAndLocation{Project: params.ProjectID, Location: params.Region}
+	// Parse regions
+	regions := parseRegions(params.Region)
+
+	// Create shared BigQuery client
 	bq, err := bigquery.NewClient(ctx, params.TargetProjectID, buildClientOptions(params)...)
 	if err != nil {
 		return fmt.Errorf("create bigquery client: %w", err)
 	}
 	defer bq.Close()
 
+	// Create dataset once
 	fmt.Println(messages.ExportCreatingDataset{DatasetID: params.DatasetID})
 	dataset := bq.Dataset(params.DatasetID)
 	err = dataset.Create(ctx, &bigquery.DatasetMetadata{
@@ -159,22 +185,33 @@ func Export(params *Params) error {
 		return fmt.Errorf("create dataset: %w", err)
 	}
 
+	// Create shared MC client
 	mc, err := MCFactory(ctx, params)
 	if err != nil {
 		return err
 	}
+
 	grp, ctx := errgroup.WithContext(ctx)
 
-	assetCount, err := mc.AssetCount(ctx, path)
-	if err != nil {
-		return fmt.Errorf("fetch asset count: %w", err)
+	// Process each region
+	for _, region := range regions {
+		region := region // capture for closure
+		path := mcutil.ProjectAndLocation{Project: params.ProjectID, Location: region}
+		regionSuffix := computeRegionSuffix(region, params.MergeRegions)
+
+		assetCount, err := mc.AssetCount(ctx, path)
+		if err != nil {
+			return fmt.Errorf("fetch asset count for region %s: %w", region, err)
+		}
+
+		assetSource := mc.AssetSource(ctx, path)
+		groupSource := mc.GroupSource(ctx, path)
+		preferenceSetSource := mc.PreferenceSetSource(ctx, path)
+
+		grp.Go(newExportTask(ctx, dataset, params, groupSource, "groups", regionSuffix, 0))
+		grp.Go(newExportTask(ctx, dataset, params, assetSource, "assets", regionSuffix, uint64(assetCount)))
+		grp.Go(newExportTask(ctx, dataset, params, preferenceSetSource, "preference_sets", regionSuffix, 0))
 	}
-	assetSource := mc.AssetSource(ctx, path)
-	groupSource := mc.GroupSource(ctx, path)
-	preferenceSetSource := mc.PreferenceSetSource(ctx, path)
-	grp.Go(newExportTask(ctx, dataset, params, groupSource, "groups", 0))
-	grp.Go(newExportTask(ctx, dataset, params, assetSource, "assets", uint64(assetCount)))
-	grp.Go(newExportTask(ctx, dataset, params, preferenceSetSource, "preference_sets", 0))
 
 	err = grp.Wait()
 	if err != nil {
@@ -182,7 +219,7 @@ func Export(params *Params) error {
 	}
 
 	fmt.Println(messages.ExportComplete{
-		BytesTransferred: assetSource.BytesRead() + groupSource.BytesRead() + preferenceSetSource.BytesRead(),
+		BytesTransferred: 0, // Can't track accurately across regions in parallel
 	})
 
 	return nil
